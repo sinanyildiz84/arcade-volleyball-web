@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Arcade Volleyball</title>
+<meta name="description" content="Arcade Volleyball (COMPUTE! 1989), ported to the browser from the Amiga source code. Plays offline, installs to your phone.">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Volleyball">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root { color-scheme: dark; --ui: #557788; --ui-bright: #88aacc; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; background: #000; color: var(--ui);
+    font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+    overscroll-behavior: none; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    display: flex; flex-direction: column; touch-action: manipulation;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  header {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    border-bottom: 1px solid #1b2a33; flex: 0 0 auto;
+  }
+  header h1 { font-size: 13px; font-weight: 600; margin: 0; color: var(--ui-bright); letter-spacing: .04em; }
+  header .spacer { flex: 1; }
+  header button, header a.btn {
+    background: #0d1620; border: 1px solid #273a47; color: var(--ui-bright);
+    border-radius: 7px; padding: 6px 10px; font: inherit; cursor: pointer; text-decoration: none;
+  }
+  header button:active { background: #16222e; }
+  #install[hidden], #ioshint[hidden] { display: none; }
+
+  #screen-wrap { flex: 1 1 auto; display: grid; place-items: center; min-height: 0; padding: 6px; }
+  canvas {
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    background: #000; display: block; touch-action: none;
+  }
+
+  /* on-screen controls */
+  #pads { flex: 0 0 auto; display: none; padding: 6px 8px 10px; gap: 6px;
+          justify-content: space-between; align-items: flex-end; }
+  body.touch #pads { display: flex; }
+  .group { display: flex; gap: 6px; align-items: flex-end; }
+  .pad {
+    width: 72px; height: 62px; border-radius: 12px; border: 1px solid #273a47;
+    background: #0d1620; color: var(--ui-bright); font-size: 20px; font-weight: 600;
+    display: grid; place-items: center; touch-action: none; cursor: pointer;
+  }
+  .pad.wide { width: 92px; }
+  .pad.held { background: #1d3140; color: #cfe6ff; }
+  .pad small { display: block; font-size: 10px; font-weight: 400; opacity: .75; }
+  /* two clusters have to share the width */
+  body.two-players .pad { width: 48px; height: 58px; font-size: 16px; }
+  body.two-players .pad.wide { width: 60px; font-size: 11px; }
+
+  /* which pads are visible depends on the mode, set from game.js */
+  .menu-only, .two-only { display: none; }
+  body.in-menu .menu-only { display: grid; }
+  body.in-menu .game-only { display: none; }
+  body.two-players .two-only { display: grid; }
+  body.two-players .solo-only { display: none; }
+
+  footer { flex: 0 0 auto; padding: 4px 10px 10px; font-size: 11px; opacity: .65; }
+  footer a { color: var(--ui-bright); }
+  body.touch footer .keys { display: none; }
+
+  /* "zen": everything but the game and its buttons goes away. Used when the
+     browser refuses fullscreen (inside an iframe, or iOS Safari). */
+  body.zen header, body.zen footer { display: none; }
+  body.zen #screen-wrap { padding: 0; }
+  #zen-exit {
+    display: none; position: fixed; top: calc(6px + env(safe-area-inset-top));
+    right: calc(6px + env(safe-area-inset-right)); z-index: 5;
+    background: #0d1620cc; border: 1px solid #273a47; color: var(--ui-bright);
+    border-radius: 7px; padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  body.zen #zen-exit { display: block; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ARCADE VOLLEYBALL</h1>
+  <span class="spacer"></span>
+  <button data-key="pause" title="Pause">II</button>
+  <button data-key="quit" title="Back to the menu">MENU</button>
+  <button id="smooth" title="Smooth motion (off = the Amiga's 50 Hz steps)">〰</button>
+  <button id="sound" title="Sound on/off">🔊</button>
+  <button id="full" title="Fullscreen">⛶</button>
+  <button id="install" hidden>Install</button>
+</header>
+
+<button id="zen-exit" title="Leave fullscreen">✕</button>
+
+<div id="screen-wrap">
+  <canvas id="screen" width="320" height="200" aria-label="Arcade Volleyball"></canvas>
+</div>
+
+<div id="pads">
+  <div class="group">
+    <!-- menu -->
+    <div class="pad menu-only" data-port="1" data-key="up">▲</div>
+    <div class="pad menu-only" data-port="1" data-key="down">▼</div>
+    <!-- left player, only when two people play -->
+    <div class="pad game-only two-only" data-port="0" data-key="left">◀<small>P1</small></div>
+    <div class="pad game-only two-only" data-port="0" data-key="right">▶<small>P1</small></div>
+    <div class="pad game-only two-only wide" data-port="0" data-key="fire">JUMP<small>P1</small></div>
+    <!-- the single player's arrows -->
+    <div class="pad game-only solo-only" data-port="1" data-key="left">◀</div>
+    <div class="pad game-only solo-only" data-port="1" data-key="right">▶</div>
+  </div>
+  <div class="group">
+    <div class="pad menu-only wide" data-port="1" data-key="fire">START</div>
+    <!-- right player when two play, otherwise just the jump button -->
+    <div class="pad game-only two-only" data-port="1" data-key="left">◀<small>P2</small></div>
+    <div class="pad game-only two-only" data-port="1" data-key="right">▶<small>P2</small></div>
+    <div class="pad game-only two-only wide" data-port="1" data-key="fire">JUMP<small>P2</small></div>
+    <div class="pad game-only solo-only wide" data-port="1" data-key="fire">JUMP</div>
+  </div>
+</div>
+
+<footer>
+  <span class="keys">Keys: <b>&larr; &rarr;</b> move, <b>space</b> jump / select, <b>&uarr; &darr;</b> menu,
+  <b>P</b> pause, <b>Esc</b> back to menu. Second player: <b>A</b> <b>D</b> move, <b>W</b> jump. &nbsp;</span>
+  <span id="ioshint" hidden>To install: Share → Add to Home Screen.</span>
+</footer>
+
+<script src="sprites.js"></script>
+<script src="game.js"></script>
+<script>
+  // touch devices get the on-screen pads
+  if (matchMedia('(hover: none) and (pointer: coarse)').matches || navigator.maxTouchPoints > 0) {
+    document.body.classList.add('touch');
+  }
+  addEventListener('resize', () => AVB.resize());
+  AVB.resize();
+
+  const soundBtn = document.getElementById('sound');
+  soundBtn.addEventListener('click', () => {
+    AVB.Sound.resume();
+    AVB.Sound.muted = !AVB.Sound.muted;
+    soundBtn.textContent = AVB.Sound.muted ? '🔇' : '🔊';
+  });
+
+  const smoothBtn = document.getElementById('smooth');
+  const showSmooth = () => { smoothBtn.style.opacity = AVB.smooth ? '1' : '.45'; };
+  smoothBtn.addEventListener('click', () => {
+    AVB.setSmooth(!AVB.smooth);
+    showSmooth();
+  });
+  showSmooth();
+
+  // Fullscreen is blocked inside an iframe and missing on iOS Safari, so
+  // fall back to hiding everything but the game.
+  const fullBtn = document.getElementById('full');
+  function zen(on) {
+    document.body.classList.toggle('zen', on);
+    setTimeout(() => AVB.resize(), 100);
+  }
+  fullBtn.addEventListener('click', async () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+      zen(false);
+      return;
+    }
+    if (document.body.classList.contains('zen')) {
+      zen(false);
+      return;
+    }
+    zen(true);
+    try {
+      await document.documentElement.requestFullscreen();
+    } catch {
+      /* no fullscreen here: the zen layout is the fallback */
+    }
+  });
+  addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && !document.body.classList.contains('zen')) zen(false);
+  });
+  document.getElementById('zen-exit').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    zen(false);
+  });
+
+  // "Install" button: Chrome and Edge fire beforeinstallprompt, iOS does not
+  let deferred = null;
+  const installBtn = document.getElementById('install');
+  addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferred = e;
+    installBtn.hidden = false;
+  });
+  installBtn.addEventListener('click', async () => {
+    if (!deferred) return;
+    deferred.prompt();
+    await deferred.userChoice;
+    deferred = null;
+    installBtn.hidden = true;
+  });
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (isIOS && !navigator.standalone) document.getElementById('ioshint').hidden = false;
+
+  // cache everything on the first visit so the game runs offline afterwards
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>
